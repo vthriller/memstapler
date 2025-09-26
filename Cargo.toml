@@ -1,0 +1,7 @@
+[package]
+name = "memstapler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+unwrap_or = "1.0"
