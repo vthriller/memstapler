@@ -87,9 +87,16 @@ fn main() {
 				break;
 			}
 		}
+		stdin.write(b".\n"); // signal that another scanning is done
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
 	}
+}
+
+struct Map {
+	addr: std::ptr::NonNull<std::ffi::c_void>,
+	len: std::num::NonZero<usize>,
+	last_seen_ago: u8,
 }
 
 fn locker() {
@@ -98,7 +105,7 @@ fn locker() {
 		return;
 	}
 
-	let mut maps = HashSet::new();
+	let mut maps: HashMap<String, Map> = HashMap::new();
 
 	let stdin = std::io::stdin();
 	let stdin = stdin.lock();
@@ -109,7 +116,33 @@ fn locker() {
 			continue;
 		});
 
-		if maps.contains(&fname) {
+		if fname == "." {
+			// parent stopped scanning, look for outdated maps
+			maps.retain(|fname, map| {
+				if map.last_seen_ago < 5 { // TODO configurable
+					// only recently disappeared, wait in case it's going to return
+					// (service respawn, cron script etc)
+					map.last_seen_ago += 1;
+					return true;
+				}
+				match unsafe { munmap(map.addr, map.len.into()) } {
+					Ok(()) => {
+						eprintln!("removed {}", &fname);
+						false
+					},
+					Err(err) => {
+						eprintln!("{}: failed to unmap: {}", &fname, err);
+						// will try again later
+						true
+					},
+				}
+			});
+			continue;
+		}
+
+		let entry = maps.entry(fname.clone());
+		if let hash_map::Entry::Occupied(mut map) = entry {
+			map.get_mut().last_seen_ago = 0;
 			continue;
 		}
 
@@ -130,12 +163,15 @@ fn locker() {
 				MapFlags::MAP_SHARED,
 				f,
 				0, // offset
-			).context("mmap") })
+			).context("mmap") }.map(|addr| Map {
+				addr, len,
+				last_seen_ago: 0,
+			}))
 			;
 		match map {
-			Ok(_) => {
+			Ok(map) => {
 				eprintln!("added {}", &fname);
-				maps.insert(fname.to_string());
+				maps.insert(fname.to_string(), map);
 			},
 			Err(err) => {
 				eprintln!("{}: {:#}", &fname, err);
