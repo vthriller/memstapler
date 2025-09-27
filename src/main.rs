@@ -8,26 +8,24 @@ use anyhow::Context;
 fn main() {
 	let mut args = std::env::args();
 	args.next();
-	if args.next().is_some() {
-		return locker();
+	if let Some(ns) = args.next() {
+		return locker(&ns);
 	}
 
-	let child = std::env::current_exe().context("I don't even know who I am")
-		.and_then(|exe| std::process::Command::new(exe)
-			.args(["-"])
-			.stdin(std::process::Stdio::piped())
-			.spawn().context("while spawning child"));
-	let mut child = unwrap_ok_or!(child, err, {
-		eprintln!("fatal: {:#}", err);
+	let exe = unwrap_ok_or!(std::env::current_exe(), err, {
+		eprintln!("fatal: I don't even know who I am: {}", err);
 		return;
 	});
-	let mut stdin = unwrap_some_or!(child.stdin.take(), {
-		eprintln!("fatal: can't write to child");
-		return;
-	});
+	let mut children = HashMap::new();
 
 	loop {
+		// clean up dead children
+		children.retain(|_, child: &mut std::process::Child| {
+			! child.try_wait().ok().map(|status| status.is_some()).unwrap_or(false)
+		});
+
 		let mut files: HashMap<_, HashSet<_>> = HashMap::new();
+		let mut own_ns = None;
 
 		let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
 			eprintln!("/proc: cannot open: {}", err);
@@ -42,7 +40,7 @@ fn main() {
 			let pid = f.file_name();
 			// not a number in any case, don't bother spamming stderr about that
 			let pid = unwrap_some_or!(pid.to_str(), continue);
-			let _pid: usize = unwrap_ok_or!(pid.parse(), _, continue);
+			let pid: u32 = unwrap_ok_or!(pid.parse(), _, continue);
 
 			let f = f.path();
 
@@ -53,6 +51,9 @@ fn main() {
 				continue;
 			});
 			let ns = ns.into_os_string();
+			if pid == std::process::id() {
+				own_ns = Some(ns.clone());
+			}
 
 			let maps = unwrap_ok_or!(File::open(f.join("maps")), err, {
 				if err.kind() != ErrorKind::NotFound {
@@ -93,16 +94,39 @@ fn main() {
 		}
 
 		for (ns, files) in files {
+		let ns = if own_ns.as_ref().map(|ons| *ons == ns).unwrap_or(false) {
+			"-".into()
+		} else {
+			ns
+		};
+		let entry = children.entry(ns.clone());
+		let mut entry = match entry {
+			hash_map::Entry::Vacant(_) => {
+				let child = std::process::Command::new(&exe)
+					.args([ns])
+					.stdin(std::process::Stdio::piped())
+					.spawn();
+				let child = unwrap_ok_or!(child, err, {
+					eprintln!("failed to spawn child: {}", err);
+					continue;
+				});
+				entry.insert_entry(child)
+			},
+			hash_map::Entry::Occupied(entry) => entry,
+		};
+		let child = entry.get_mut();
+		let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
+
 		for f in files {
-			if stdin.write(f.as_bytes()).is_err() {
+			if child.write(f.as_bytes()).is_err() {
 				break;
 			}
-			if stdin.write(b"\n").is_err() {
+			if child.write(b"\n").is_err() {
 				break;
 			}
 		}
+		child.write(b".\n"); // signal that another scanning is done
 		}
-		stdin.write(b".\n"); // signal that another scanning is done
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
 	}
@@ -114,10 +138,50 @@ struct Map {
 	last_seen_ago: u8,
 }
 
-fn locker() {
+fn locker(target_ns: &str) {
 	if let Err(err) = mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE) {
 		eprintln!("mlockall: {}", err);
 		return;
+	}
+
+	if target_ns != "-" {
+		/*
+		Parent process is busy scanning processes and their maps;
+		by the time it's done, processes might already be gone, pids could get recycled etc.
+		Start our own parallel scan instead.
+		*/
+		let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
+			eprintln!("/proc: cannot open: {}", err);
+			return;
+		});
+		let mut changed = false;
+		for f in proc {
+			let f = unwrap_ok_or!(f, err, {
+				eprintln!("/proc: while scanning: {}", err);
+				continue;
+			});
+			let nsfile = f.path().join("ns/mnt");
+			let f = unwrap_ok_or!(File::open(&nsfile), _, continue);
+			let ns = unwrap_ok_or!(nsfile.read_link(), _, continue);
+			if ns.into_os_string() != target_ns {
+				continue;
+			};
+
+			match nix::sched::setns(f, nix::sched::CloneFlags::CLONE_NEWNS) {
+				Ok(()) => {
+					changed = true;
+					break;
+				},
+				Err(err) => {
+					eprintln!("{}: failed to change namespace via {:?}: {}", target_ns, nsfile, err);
+					continue;
+				}
+			}
+		}
+		if ! changed {
+			eprintln!("{}: failed to change namespace, aborting", target_ns);
+			return;
+		}
 	}
 
 	let mut maps: HashMap<String, Map> = HashMap::new();
