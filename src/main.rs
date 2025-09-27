@@ -44,6 +44,14 @@ fn main() {
 
 			let f = f.path();
 
+			let pexe = unwrap_ok_or!(f.join("exe").read_link(), err, {
+				// ENOENT usually means it's a zombie, kthread or some other thing that has no meaningful maps
+				if err.kind() != ErrorKind::NotFound {
+					eprintln!("{}: failed to look up ns: {}", f.to_string_lossy(), err);
+				}
+				continue;
+			});
+
 			let ns = unwrap_ok_or!(f.join("ns/mnt").read_link(), err, {
 				if err.kind() != ErrorKind::NotFound {
 					eprintln!("{}: failed to look up ns: {}", f.to_string_lossy(), err);
@@ -53,6 +61,16 @@ fn main() {
 			let ns = ns.into_os_string();
 			if pid == std::process::id() {
 				own_ns = Some(ns.clone());
+			}
+
+			if pexe == exe {
+				/*
+				skip our own binary:
+				- we already mlockall() ourselves, no need to pollute address space
+				- because we inject ourselves into other namespaces, maps still refer to files in the root ns,
+				  which means ns-specific children fail to read memstapler and its libraries
+				*/
+				continue;
 			}
 
 			let maps = unwrap_ok_or!(File::open(f.join("maps")), err, {
