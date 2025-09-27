@@ -6,10 +6,25 @@ use nix::sys::mman::*;
 use anyhow::Context;
 
 fn main() {
-	if let Err(err) = mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE) {
-		eprintln!("mlockall: {}", err);
-		return;
+	let mut args = std::env::args();
+	args.next();
+	if args.next().is_some() {
+		return locker();
 	}
+
+	let child = std::env::current_exe().context("I don't even know who I am")
+		.and_then(|exe| std::process::Command::new(exe)
+			.args(["-"])
+			.stdin(std::process::Stdio::piped())
+			.spawn().context("while spawning child"));
+	let mut child = unwrap_ok_or!(child, err, {
+		eprintln!("fatal: {:#}", err);
+		return;
+	});
+	let mut stdin = unwrap_some_or!(child.stdin.take(), {
+		eprintln!("fatal: can't write to child");
+		return;
+	});
 
 	let mut files = HashSet::new();
 	let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
@@ -63,7 +78,33 @@ fn main() {
 		}
 	}
 
-	for fname in files {
+	for f in files {
+		if stdin.write(f.as_bytes()).is_err() {
+			break;
+		}
+		if stdin.write(b"\n").is_err() {
+			break;
+		}
+	}
+
+	std::thread::sleep(std::time::Duration::MAX);
+}
+
+fn locker() {
+	if let Err(err) = mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE) {
+		eprintln!("mlockall: {}", err);
+		return;
+	}
+
+	let stdin = std::io::stdin();
+	let stdin = stdin.lock();
+
+	for fname in stdin.lines() {
+		let fname = unwrap_ok_or!(fname, err, {
+			eprintln!("failed to read stdin: {}", err);
+			continue;
+		});
+		let fname = fname.trim_end_matches('\n');
 		let mut f = unwrap_ok_or!(File::open(&fname), err, {
 			eprintln!("{}: failed to open: {}", &fname, err);
 			continue;
