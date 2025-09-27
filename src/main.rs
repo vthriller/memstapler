@@ -18,10 +18,10 @@ fn main() {
 		let f = f.path();
 		let maps = unwrap_ok_or!(File::open(f.join("maps")), _, continue);
 		let maps = BufReader::new(maps);
-		for l in maps.lines() {
-			let l = unwrap_ok_or!(l, _, continue);
+		for line in maps.lines() {
+			let line = unwrap_ok_or!(line, _, continue);
 			// "7fbe11954000-7fbe11978000 r--p 00000000 fd:00 27526017                   /usr/lib64/libc.so.6"
-			let mut l = l.splitn(6, " ");
+			let mut l = line.splitn(6, " ");
 			l.next();
 			let perms = unwrap_some_or!(l.next(), continue);
 			if ! perms.contains('x') {
@@ -39,8 +39,8 @@ fn main() {
 		}
 	}
 
-	for f in files {
-		let mut f = unwrap_ok_or!(File::open(f), _, continue);
+	for fname in files {
+		let mut f = unwrap_ok_or!(File::open(&fname), _, continue);
 		let len = unwrap_ok_or!(f.seek(SeekFrom::End(0)), _, continue);
 		let len = unwrap_some_or!(len.try_into().ok().and_then(std::num::NonZeroUsize::new), continue);
 		unsafe {
