@@ -3,34 +3,58 @@ use unwrap_or::*;
 use std::io::*;
 use std::collections::*;
 use nix::sys::mman::*;
+use anyhow::Context;
 
 fn main() {
-	unwrap_ok_or!(mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE), _, return);
+	if let Err(err) = mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE) {
+		eprintln!("mlockall: {}", err);
+		return;
+	}
 
 	let mut files = HashSet::new();
-	for f in read_dir("/proc/").unwrap() {
-		let f = unwrap_ok_or!(f, _, continue);
+	let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
+		eprintln!("/proc: cannot open: {}", err);
+		return;
+	});
+	for f in proc {
+		let f = unwrap_ok_or!(f, err, {
+			eprintln!("/proc: while scanning: {}", err);
+			continue;
+		});
 
 		let pid = f.file_name();
+		// not a number in any case, don't bother spamming stderr about that
 		let pid = unwrap_some_or!(pid.to_str(), continue);
 		let _pid: usize = unwrap_ok_or!(pid.parse(), _, continue);
 
 		let f = f.path();
-		let maps = unwrap_ok_or!(File::open(f.join("maps")), _, continue);
+		let maps = unwrap_ok_or!(File::open(f.join("maps")), err, {
+			eprintln!("{}/maps: failed to read: {}", f.to_string_lossy(), err);
+			continue;
+		});
 		let maps = BufReader::new(maps);
 		for line in maps.lines() {
-			let line = unwrap_ok_or!(line, _, continue);
+			let line = unwrap_ok_or!(line, err, {
+				eprintln!("{}/maps: while reading maps: {}", f.to_string_lossy(), err);
+				continue;
+			});
 			// "7fbe11954000-7fbe11978000 r--p 00000000 fd:00 27526017                   /usr/lib64/libc.so.6"
 			let mut l = line.splitn(6, " ");
 			l.next();
-			let perms = unwrap_some_or!(l.next(), continue);
+			let perms = unwrap_some_or!(l.next(), {
+				eprintln!("{}/maps: malformed line: {}", f.to_string_lossy(), line);
+				continue;
+			});
 			if ! perms.contains('x') {
 				continue;
 			}
 			l.next();
 			l.next();
 			l.next();
-			let path = unwrap_some_or!(l.next(), continue).trim_start();
+			let path = unwrap_some_or!(l.next(), {
+				eprintln!("{}/maps: malformed line: {}", f.to_string_lossy(), line);
+				continue;
+			}).trim_start();
 			if ! path.starts_with('/') {
 				// e.g. "[vdso]" or "" for anon mappings
 				continue;
@@ -40,18 +64,26 @@ fn main() {
 	}
 
 	for fname in files {
-		let mut f = unwrap_ok_or!(File::open(&fname), _, continue);
-		let len = unwrap_ok_or!(f.seek(SeekFrom::End(0)), _, continue);
-		let len = unwrap_some_or!(len.try_into().ok().and_then(std::num::NonZeroUsize::new), continue);
-		unsafe {
-			let _ = mmap(
+		let mut f = unwrap_ok_or!(File::open(&fname), err, {
+			eprintln!("{}: failed to open: {}", &fname, err);
+			continue;
+		});
+
+		if let Err(err) = f
+			.seek(SeekFrom::End(0)).context("failed to seek")
+			.and_then(|len| len.try_into().context("file size too large for mmap"))
+			.and_then(|len| std::num::NonZeroUsize::new(len).context("empty file"))
+			.and_then(|len| unsafe { mmap(
 				None, // addr
 				len,
 				ProtFlags::PROT_READ,
 				MapFlags::MAP_SHARED,
 				f,
 				0, // offset
-			);
+			).context("mmap") })
+		{
+			eprintln!("{}: {:#}", &fname, err);
+			continue;
 		}
 	}
 
