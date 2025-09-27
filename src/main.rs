@@ -132,39 +132,39 @@ fn main() {
 		}
 
 		for (ns, files) in files {
-		let ns = if own_ns.as_ref().map(|ons| *ons == ns).unwrap_or(false) {
-			"-".into()
-		} else {
-			ns
-		};
-		let entry = children.entry(ns.clone());
-		let mut entry = match entry {
-			Entry::Vacant(_) => {
-				let child = process::Command::new(&exe)
-					.args([ns])
-					.stdin(process::Stdio::piped())
-					.spawn();
-				let child = unwrap_ok_or!(child, err, {
-					eprintln!("failed to spawn child: {}", err);
-					continue;
-				});
-				entry.insert_entry(child)
-			},
-			Entry::Occupied(entry) => entry,
-		};
-		let child = entry.get_mut();
-		let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
+			let ns = if own_ns.as_ref().map(|ons| *ons == ns).unwrap_or(false) {
+				"-".into()
+			} else {
+				ns
+			};
+			let entry = children.entry(ns.clone());
+			let mut entry = match entry {
+				Entry::Vacant(_) => {
+					let child = process::Command::new(&exe)
+						.args([ns])
+						.stdin(process::Stdio::piped())
+						.spawn();
+					let child = unwrap_ok_or!(child, err, {
+						eprintln!("failed to spawn child: {}", err);
+						continue;
+					});
+					entry.insert_entry(child)
+				},
+				Entry::Occupied(entry) => entry,
+			};
+			let child = entry.get_mut();
+			let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
 
-		for f in files {
-			if child.write(f.as_bytes()).is_err() {
-				break;
+			for f in files {
+				if child.write(f.as_bytes()).is_err() {
+					break;
+				}
+				if child.write(b"\n").is_err() {
+					break;
+				}
 			}
-			if child.write(b"\n").is_err() {
-				break;
-			}
-		}
-		child.write(b".\n"); // signal that another scanning is done
-		child.flush();
+			child.write(b".\n"); // signal that another scanning is done
+			child.flush();
 		}
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
