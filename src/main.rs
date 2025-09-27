@@ -2,8 +2,11 @@ use std::fs::*;
 use unwrap_or::*;
 use std::io::*;
 use std::collections::*;
+use nix::sys::mman::*;
 
 fn main() {
+	unwrap_ok_or!(mlockall(MlockAllFlags::MCL_CURRENT | MlockAllFlags::MCL_FUTURE), _, return);
+
 	let mut files = HashSet::new();
 	for f in read_dir("/proc/").unwrap() {
 		let f = unwrap_ok_or!(f, _, continue);
@@ -35,5 +38,22 @@ fn main() {
 			files.insert(path.to_string());
 		}
 	}
-	dbg!(files);
+
+	for f in files {
+		let mut f = unwrap_ok_or!(File::open(f), _, continue);
+		let len = unwrap_ok_or!(f.seek(SeekFrom::End(0)), _, continue);
+		let len = unwrap_some_or!(len.try_into().ok().and_then(std::num::NonZeroUsize::new), continue);
+		unsafe {
+			let _ = mmap(
+				None, // addr
+				len,
+				ProtFlags::PROT_READ,
+				MapFlags::MAP_SHARED,
+				f,
+				0, // offset
+			);
+		}
+	}
+
+	std::thread::sleep(std::time::Duration::MAX);
 }

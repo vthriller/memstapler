@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 unwrap_or = "1.0"
+nix = { version = "0.30", features = ["mman"] }
