@@ -26,6 +26,7 @@ fn main() {
 		return;
 	});
 
+	loop {
 	let mut files = HashSet::new();
 	let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
 		eprintln!("/proc: cannot open: {}", err);
@@ -87,7 +88,8 @@ fn main() {
 		}
 	}
 
-	std::thread::sleep(std::time::Duration::MAX);
+	std::thread::sleep(std::time::Duration::new(5, 0));
+	}
 }
 
 fn locker() {
@@ -95,6 +97,8 @@ fn locker() {
 		eprintln!("mlockall: {}", err);
 		return;
 	}
+
+	let mut maps = HashSet::new();
 
 	let stdin = std::io::stdin();
 	let stdin = stdin.lock();
@@ -104,13 +108,18 @@ fn locker() {
 			eprintln!("failed to read stdin: {}", err);
 			continue;
 		});
+
+		if maps.contains(&fname) {
+			continue;
+		}
+
 		let fname = fname.trim_end_matches('\n');
 		let mut f = unwrap_ok_or!(File::open(&fname), err, {
 			eprintln!("{}: failed to open: {}", &fname, err);
 			continue;
 		});
 
-		if let Err(err) = f
+		let map = f
 			.seek(SeekFrom::End(0)).context("failed to seek")
 			.and_then(|len| len.try_into().context("file size too large for mmap"))
 			.and_then(|len| std::num::NonZeroUsize::new(len).context("empty file"))
@@ -122,11 +131,16 @@ fn locker() {
 				f,
 				0, // offset
 			).context("mmap") })
-		{
+			;
+		match map {
+		Ok(_) => {
+			eprintln!("added {}", &fname);
+			maps.insert(fname.to_string());
+		},
+		Err(err) => {
 			eprintln!("{}: {:#}", &fname, err);
 			continue;
 		}
+		}
 	}
-
-	std::thread::sleep(std::time::Duration::MAX);
 }
