@@ -126,6 +126,7 @@ fn main() {
 			}
 		}
 		child.write(b".\n"); // signal that another scanning is done
+		child.flush();
 		}
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
