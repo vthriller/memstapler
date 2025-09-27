@@ -27,7 +27,8 @@ fn main() {
 	});
 
 	loop {
-		let mut files = HashSet::new();
+		let mut files: HashMap<_, HashSet<_>> = HashMap::new();
+
 		let proc = unwrap_ok_or!(read_dir("/proc/"), err, {
 			eprintln!("/proc: cannot open: {}", err);
 			return;
@@ -44,6 +45,15 @@ fn main() {
 			let _pid: usize = unwrap_ok_or!(pid.parse(), _, continue);
 
 			let f = f.path();
+
+			let ns = unwrap_ok_or!(f.join("ns/mnt").read_link(), err, {
+				if err.kind() != ErrorKind::NotFound {
+					eprintln!("{}: failed to look up ns: {}", f.to_string_lossy(), err);
+				}
+				continue;
+			});
+			let ns = ns.into_os_string();
+
 			let maps = unwrap_ok_or!(File::open(f.join("maps")), err, {
 				if err.kind() != ErrorKind::NotFound {
 					eprintln!("{}/maps: failed to open: {}", f.to_string_lossy(), err);
@@ -51,6 +61,7 @@ fn main() {
 				continue;
 			});
 			let maps = BufReader::new(maps);
+			let ns_files = files.entry(ns).or_default();
 			for line in maps.lines() {
 				let line = unwrap_ok_or!(line, err, {
 					eprintln!("{}/maps: while reading maps: {}", f.to_string_lossy(), err);
@@ -77,10 +88,11 @@ fn main() {
 					// e.g. "[vdso]" or "" for anon mappings
 					continue;
 				}
-				files.insert(path.to_string());
+				ns_files.insert(path.to_string());
 			}
 		}
 
+		for (ns, files) in files {
 		for f in files {
 			if stdin.write(f.as_bytes()).is_err() {
 				break;
@@ -88,6 +100,7 @@ fn main() {
 			if stdin.write(b"\n").is_err() {
 				break;
 			}
+		}
 		}
 		stdin.write(b".\n"); // signal that another scanning is done
 
