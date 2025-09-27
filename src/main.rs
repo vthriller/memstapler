@@ -1,18 +1,21 @@
 use std::fs::*;
 use unwrap_or::*;
 use std::io::*;
-use std::collections::*;
+use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::env;
+use std::num;
+use std::process;
 use nix::sys::mman::*;
 use anyhow::Context;
 
 fn main() {
-	let mut args = std::env::args();
+	let mut args = env::args();
 	args.next();
 	if let Some(ns) = args.next() {
 		return locker(&ns);
 	}
 
-	let exe = unwrap_ok_or!(std::env::current_exe(), err, {
+	let exe = unwrap_ok_or!(env::current_exe(), err, {
 		eprintln!("fatal: I don't even know who I am: {}", err);
 		return;
 	});
@@ -20,7 +23,7 @@ fn main() {
 
 	loop {
 		// clean up dead children
-		children.retain(|_, child: &mut std::process::Child| {
+		children.retain(|_, child: &mut process::Child| {
 			! child.try_wait().ok().map(|status| status.is_some()).unwrap_or(false)
 		});
 
@@ -59,7 +62,7 @@ fn main() {
 				continue;
 			});
 			let ns = ns.into_os_string();
-			if pid == std::process::id() {
+			if pid == process::id() {
 				own_ns = Some(ns.clone());
 			}
 
@@ -119,10 +122,10 @@ fn main() {
 		};
 		let entry = children.entry(ns.clone());
 		let mut entry = match entry {
-			hash_map::Entry::Vacant(_) => {
-				let child = std::process::Command::new(&exe)
+			Entry::Vacant(_) => {
+				let child = process::Command::new(&exe)
 					.args([ns])
-					.stdin(std::process::Stdio::piped())
+					.stdin(process::Stdio::piped())
 					.spawn();
 				let child = unwrap_ok_or!(child, err, {
 					eprintln!("failed to spawn child: {}", err);
@@ -130,7 +133,7 @@ fn main() {
 				});
 				entry.insert_entry(child)
 			},
-			hash_map::Entry::Occupied(entry) => entry,
+			Entry::Occupied(entry) => entry,
 		};
 		let child = entry.get_mut();
 		let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
@@ -153,7 +156,7 @@ fn main() {
 
 struct Map {
 	addr: std::ptr::NonNull<std::ffi::c_void>,
-	len: std::num::NonZero<usize>,
+	len: num::NonZero<usize>,
 	last_seen_ago: u8,
 }
 
@@ -239,7 +242,7 @@ fn locker(target_ns: &str) {
 		}
 
 		let entry = maps.entry(fname.clone());
-		if let hash_map::Entry::Occupied(mut map) = entry {
+		if let Entry::Occupied(mut map) = entry {
 			map.get_mut().last_seen_ago = 0;
 			continue;
 		}
@@ -253,7 +256,7 @@ fn locker(target_ns: &str) {
 		let map = f
 			.seek(SeekFrom::End(0)).context("failed to seek")
 			.and_then(|len| len.try_into().context("file size too large for mmap"))
-			.and_then(|len| std::num::NonZeroUsize::new(len).context("empty file"))
+			.and_then(|len| num::NonZeroUsize::new(len).context("empty file"))
 			.and_then(|len| unsafe { mmap(
 				None, // addr
 				len,
