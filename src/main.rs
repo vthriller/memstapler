@@ -45,7 +45,9 @@ fn main() {
 
 			let f = f.path();
 			let maps = unwrap_ok_or!(File::open(f.join("maps")), err, {
-				eprintln!("{}/maps: failed to read: {}", f.to_string_lossy(), err);
+				if err.kind() != ErrorKind::NotFound {
+					eprintln!("{}/maps: failed to open: {}", f.to_string_lossy(), err);
+				}
 				continue;
 			});
 			let maps = BufReader::new(maps);
