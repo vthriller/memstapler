@@ -25,6 +25,7 @@ use std::process;
 use nix::sys::mman::*;
 use anyhow::Context;
 use std::convert::TryInto;
+use std::os::unix::io::AsRawFd;
 
 fn main() {
 	let mut args = env::args();
@@ -183,8 +184,8 @@ fn main() {
 }
 
 struct Map {
-	addr: std::ptr::NonNull<std::ffi::c_void>,
-	len: num::NonZero<usize>,
+	addr: *mut std::ffi::c_void,
+	len: num::NonZeroUsize,
 	last_seen_ago: u8,
 }
 
@@ -217,7 +218,7 @@ fn locker(target_ns: &str) {
 				continue;
 			};
 
-			match nix::sched::setns(f, nix::sched::CloneFlags::CLONE_NEWNS) {
+			match nix::sched::setns(f.as_raw_fd(), nix::sched::CloneFlags::CLONE_NEWNS) {
 				Ok(()) => {
 					changed = true;
 					break;
@@ -290,7 +291,7 @@ fn locker(target_ns: &str) {
 				len,
 				ProtFlags::PROT_READ,
 				MapFlags::MAP_SHARED,
-				f,
+				f.as_raw_fd(),
 				0, // offset
 			).context("mmap") }.map(|addr| Map {
 				addr, len,

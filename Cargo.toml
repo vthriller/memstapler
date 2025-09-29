@@ -6,7 +6,8 @@ rust-version = "1.56"
 
 [dependencies]
 unwrap_or = "1.0"
-nix = { version = "0.30", features = ["mman", "sched"] }
+nix = { version = "0.26", features = ["mman", "sched"] }
+libc = "=0.2.151"
 anyhow = "1.0"
 
 [profile.release]
