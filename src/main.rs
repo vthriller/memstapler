@@ -133,11 +133,11 @@ fn main() {
 			}
 		}
 
-		for (ns, files) in files {
-			let ns = if own_ns.as_ref().map(|ons| *ons == ns).unwrap_or(false) {
+		for (ns, files) in &files {
+			let ns = if own_ns.as_ref().map(|ons| *ons == *ns).unwrap_or(false) {
 				"-".into()
 			} else {
-				ns
+				ns.clone()
 			};
 			let entry = children.entry(ns.clone());
 			let child = match entry {
@@ -177,6 +177,21 @@ fn main() {
 				let _ = child.kill(); // you tried.gif
 				let _ = child.wait();
 			}
+		}
+
+		// stop children for namespaces that have no processes other than our own
+		let mut ns_gone = vec![];
+		for ns in children.keys() {
+			if files.contains_key(ns) || ns == "-" {
+				continue;
+			}
+			ns_gone.push(ns.clone())
+		}
+		for ns in ns_gone.into_iter() {
+			let mut child = children.remove(&ns).unwrap();
+			// close stdin
+			std::mem::drop(child.stdin.take().unwrap());
+			let _ = child.wait();
 		}
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
