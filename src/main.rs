@@ -156,14 +156,14 @@ fn main() {
 			let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
 
 			for f in files {
-				if child.write(f.as_bytes()).is_err() {
+				if child.write_all(f.as_bytes()).is_err() {
 					break;
 				}
-				if child.write(b"\n").is_err() {
+				if child.write_all(b"\n").is_err() {
 					break;
 				}
 			}
-			child.write(b".\n"); // signal that another scanning is done
+			child.write_all(b".\n"); // signal that another scanning is done
 			child.flush();
 		}
 
