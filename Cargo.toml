@@ -7,3 +7,6 @@ edition = "2024"
 unwrap_or = "1.0"
 nix = { version = "0.30", features = ["mman", "sched"] }
 anyhow = "1.0"
+
+[profile.release]
+debug = true
