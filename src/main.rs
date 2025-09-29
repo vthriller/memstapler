@@ -139,7 +139,7 @@ fn main() {
 				ns
 			};
 			let entry = children.entry(ns.clone());
-			let mut entry = match entry {
+			let child = match entry {
 				Entry::Vacant(_) => {
 					let child = process::Command::new(&exe)
 						.args([ns])
@@ -149,11 +149,10 @@ fn main() {
 						eprintln!("failed to spawn child: {}", err);
 						continue;
 					});
-					entry.insert_entry(child)
+					entry.or_insert(child)
 				},
-				Entry::Occupied(entry) => entry,
+				Entry::Occupied(entry) => entry.into_mut(),
 			};
-			let child = entry.get_mut();
 			let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
 
 			for f in files {
