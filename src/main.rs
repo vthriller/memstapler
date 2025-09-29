@@ -24,6 +24,7 @@ use std::num;
 use std::process;
 use nix::sys::mman::*;
 use anyhow::Context;
+use std::convert::TryInto;
 
 fn main() {
 	let mut args = env::args();
