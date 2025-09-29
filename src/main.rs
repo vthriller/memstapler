@@ -142,7 +142,7 @@ fn main() {
 			let child = match entry {
 				Entry::Vacant(_) => {
 					let child = process::Command::new(&exe)
-						.args([ns])
+						.args([&ns])
 						.stdin(process::Stdio::piped())
 						.spawn();
 					let child = unwrap_ok_or!(child, err, {
@@ -155,16 +155,27 @@ fn main() {
 			};
 			let mut child = child.stdin.as_ref().unwrap(); // should always be Some()
 
+			let mut failed = false;
 			for f in files {
 				if child.write_all(f.as_bytes()).is_err() {
+					failed = true;
 					break;
 				}
 				if child.write_all(b"\n").is_err() {
+					failed = true;
 					break;
 				}
 			}
-			child.write_all(b".\n"); // signal that another scanning is done
-			child.flush();
+			failed = failed ||
+				child.write_all(b".\n") // signal that another scanning is done
+				.and_then(|_| child.flush())
+				.is_err();
+			if failed {
+				// dead child or whatever; scrap it if it is still around
+				let mut child = children.remove(&ns).unwrap();
+				let _ = child.kill(); // you tried.gif
+				let _ = child.wait();
+			}
 		}
 
 		std::thread::sleep(std::time::Duration::new(5, 0));
