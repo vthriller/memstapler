@@ -106,7 +106,7 @@ fn main() {
 			for line in maps.lines() {
 				let line = unwrap_ok_or!(line, err, {
 					eprintln!("{}/maps: while reading maps: {}", f.to_string_lossy(), err);
-					continue;
+					break;
 				});
 				// "7fbe11954000-7fbe11978000 r--p 00000000 fd:00 27526017                   /usr/lib64/libc.so.6"
 				let mut l = line.splitn(6, " ");
